@@ -80,6 +80,13 @@
 
 (def reg-name? keyword?)
 
+(defn reg
+  ([] (reg (gensym)))
+  ([n] (-> n name keyword)))
+
+(def fr :fr)
+(def sp :sp)
+
 (defn reg-vals*
   ([regs]
      (reg-vals* @registers regs))
@@ -87,16 +94,16 @@
      (map reg-map regs)))
 
 (defn swap* [regs r1 r2]
+  (assert (not (eq? r1 r2)) "Cannot swap a register with itself")
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
-    (assert (not (eq? v1 v2)) "Cannot swap a value with itself")
     (assoc regs r1 v2 r2 v1)))
 
 (defn swap [r1 r2]
   (swap! registers swap* r1 r2))
 
 (defn swap-car* [regs r1 r2]
+  (assert (not (eq? r1 r2)) "Cannot swap a register with itself")
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
-    (assert (not (eq? v1 v2)) "Cannot swap a value with itself")
     (assert (pair? v2) "Second argument must be a pair")
     (let [new-list (->Pair v1 (cdr v2))]
       (assoc regs r1 (car v2) r2 new-list))))
@@ -105,8 +112,8 @@
   (swap! registers swap-car* r1 r2))
 
 (defn swap-cdr* [regs r1 r2]
+  (assert (not (eq? r1 r2)) "Cannot swap a register with itself")
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
-    (assert (not (eq? v1 v2)) "Cannot swap a value with itself")
     (assert (pair? v2) "Second argument must be a pair")
     (let [new-pair (->Pair (car v2) v1)]
       (assoc regs r1 (cdr v2) r2 new-pair))))
@@ -132,9 +139,9 @@
 
 (defn cons* [regs r1 r2]
   (-> regs
-      (swap-car* r1 :fr)
-      (swap* r2 :fr)
-      (swap-cdr* :fr r2)))
+      (swap-car* r1 fr)
+      (swap* r2 fr)
+      (swap-cdr* fr r2)))
 
 (defn cons [r1 r2]
   (swap! registers cons* r1 r2))
@@ -145,9 +152,9 @@
     (assert (null? v1) "Register to pop into must be null")
     (assert (pair? v2) "Register to pop from must be a pair")
     (-> regs
-        (swap-cdr* :fr r2)
-        (swap* r2 :fr)
-        (swap-car* r1 :fr))))
+        (swap-cdr* fr r2)
+        (swap* r2 fr)
+        (swap-car* r1 fr))))
 
 (defn pop [r1 r2]
   (swap! registers pop* r1 r2))
@@ -157,23 +164,24 @@
     (if-not (null? v1)
       (if (atom? v1)
         (sreg r1 nil)
-        (do
-          (push :t1 :sp) (pop :t1 r1)
+        (let [t1 (reg "t1")]
+          (push t1 sp) (pop t1 r1)
           (free r1)
-          (swap :t1 r1) (free r1)
-          (pop :t1 :sp))))))
+          (swap t1 r1) (free r1)
+          (pop t1 sp))))))
 
 (defn copy [r1 r2]
   (let [[v1 v2] (reg-vals* [r1 r2])]
     (assert (null? v2) "Cannot copy into populated register")
     (if (atom? v1)
       (sreg r2 r1)
-      (do
-        (push :t1 :sp) (push :t2 :sp)
-        (pop :t1 r1) (copy r1 r2)
-        (swap :t1 r1) (swap :t2 r2) (copy r1 r2)
-        (swap :t1 r1) (swap :t2 r2) (push :t1 r1) (push :t2 r2)
-        (pop :t2 :sp) (pop :t1 :sp)))))
+      (let [t1 (reg "t1")
+            t2 (reg "t2")]
+        (push t1 sp) (push t2 sp)
+        (pop t1 r1) (copy r1 r2)
+        (swap t1 r1) (swap t2 r2) (copy r1 r2)
+        (swap t1 r1) (swap t2 r2) (push t1 r1) (push t2 r2)
+        (pop t2 sp) (pop t1 sp)))))
 
 (defmacro prog1 [form & forms]
   `(let [ret# ~form]
@@ -183,10 +191,11 @@
 (defn equal? [r1 r2]
   (or (and (atom? r1) (atom? r2) (eq? r1 r2))
       (and (not (atom? r1)) (not (atom? r2))
-           (do
-             (push :t1 :sp) (push :t2 :sp) (pop :t1 r1) (pop :t2 r2)
+           (let [t1 (reg "t1")
+                 t2 (reg "t2")]
+             (push t1 sp) (push t2 sp) (pop t1 r1) (pop t2 r2)
              (prog1 (and (equal? r1 r2)
-                         (do (swap :t1 r1) (swap :t2 r2)
+                         (do (swap t1 r1) (swap t2 r2)
                              (prog1 (equal? r1 r2)
-                                    (swap :t1 r1) (swap :t2 r2))))
-                    (push :t1 r1) (push :t2 r2) (pop :t2 :sp) (pop :t2 :sp))))))
+                                    (swap t1 r1) (swap t2 r2))))
+                    (push t1 r1) (push t2 r2) (pop t2 sp) (pop t2 sp))))))
