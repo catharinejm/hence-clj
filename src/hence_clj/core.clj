@@ -28,10 +28,11 @@
   (car [p] a)
   (cdr [p] d)
   (internalString [p]
-    (cond
-     (null? d) (str a)
-     (pair? d) (str a " " (internalString d))
-     :else (str a " . " d)))
+    (let [str-a (if (null? a) "nil" (str a))]
+      (cond
+       (null? d) str-a
+       (pair? d) (str str-a " " (internalString d))
+       :else (str str-a " . " d))))
 
   Object
   (toString [p]
@@ -39,7 +40,7 @@
 
 (defmethod core/print-method Pair
   [p ^Writer w]
-  (.write w (str p)))
+  p(.write w (str p)))
 (defmethod core/print-method :free-list
   [p ^Writer w]
   (.write w "([free list] ...)"))
@@ -71,7 +72,9 @@
   (with-meta
     (reify IPair
       (car [p] nil)
-      (cdr [p] (free-list)))
+      (cdr [p] (free-list))
+      (internalString [p]
+        "[free list] ..."))
     {:type :free-list}))
 
 (def registers (atom {:fr (free-list)
@@ -104,7 +107,7 @@
 
 (defn swap* [regs r1 r2]
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
-    (assert (not (eq? v1 v2) "Cannot swap a value with itself"))
+    (assert (not (eq? v1 v2)) "Cannot swap a value with itself")
     (assoc regs r1 v2 r2 v1)))
 
 (defn swap [r1 r2]
@@ -149,7 +152,7 @@
 (defn cons* [regs r1 r2]
   (-> regs
       (swap-car* r1 :fr)
-      (swap r2 :fr)
+      (swap* r2 :fr)
       (swap-cdr* :fr r2)))
 
 (defn cons [r1 r2]
@@ -157,12 +160,13 @@
 (def push cons)
 
 (defn pop* [regs r1 r2]
-  (assert (null? r1) "Register to pop into must be null")
-  (assert (pair? r2) "Register to pop from must be a pair")
-  (-> regs
-      (swap-cdr* :fr r2)
-      (swap* r2 fr)
-      (swap-car* r1 :fr)))
+  (let [[v1 v2] (reg-vals* regs [r1 r2])]
+    (assert (null? v1) "Register to pop into must be null")
+    (assert (pair? v2) "Register to pop from must be a pair")
+    (-> regs
+        (swap-cdr* :fr r2)
+        (swap* r2 :fr)
+        (swap-car* r1 :fr))))
 
 (defn pop [r1 r2]
   (swap! registers pop* r1 r2))
@@ -173,22 +177,22 @@
       (if (atom? v1)
         (sreg r1 nil)
         (do
-          (push r2 :sp) (pop r2 r1)
+          (push :t1 :sp) (pop :t1 r1)
           (free r1)
-          (swap r2 r1) (free r1)
-          (pop r2 :sp))))))
+          (swap :t1 r1) (free r1)
+          (pop :t1 :sp))))))
 
 (defn copy [r1 r2]
   (let [[v1 v2] (reg-vals* [r1 r2])]
     (assert (null? v2) "Cannot copy into populated register")
-    (if (atom? r2)
+    (if (atom? v1)
       (sreg r2 r1)
       (do
         (push :t1 :sp) (push :t2 :sp)
         (pop :t1 r1) (copy r1 r2)
         (swap :t1 r1) (swap :t2 r2) (copy r1 r2)
         (swap :t1 r1) (swap :t2 r2) (push :t1 r1) (push :t2 r2)
-        (pop :t2 sp) (pop :t1 sp)))))
+        (pop :t2 :sp) (pop :t1 :sp)))))
 
 (defmacro prog1 [form & forms]
   `(let [ret# ~form]
@@ -196,12 +200,12 @@
      ret#))
 
 (defn equal? [r1 r2]
-  (or (and (atom? r1 (atom? r2) (eq? r1 r2)))
+  (or (and (atom? r1) (atom? r2) (eq? r1 r2))
       (and (not (atom? r1)) (not (atom? r2))
            (do
-             (push :t1 :sp) (push :t2 sp) (pop :t1 r1) (pop :t2 r2)
+             (push :t1 :sp) (push :t2 :sp) (pop :t1 r1) (pop :t2 r2)
              (prog1 (and (equal? r1 r2)
                          (do (swap :t1 r1) (swap :t2 r2)
-                             (prog1 (equal r1 r2)
+                             (prog1 (equal? r1 r2)
                                     (swap :t1 r1) (swap :t2 r2))))
-                    (push :t1 r1) (push :t2 r2) (pop :t2 sp) (pop :t2 sp))))))
+                    (push :t1 r1) (push :t2 r2) (pop :t2 :sp) (pop :t2 :sp))))))
