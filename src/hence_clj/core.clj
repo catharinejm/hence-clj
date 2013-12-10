@@ -45,8 +45,6 @@
   [p ^Writer w]
   (.write w "([free list] ...)"))
 
-(declare alloc-obj)
-
 (defn pair? [f]
   (satisfies? IPair f))
 (defmacro atom? [f]
@@ -79,23 +77,6 @@
 
 (def registers (atom {:fr (free-list)
                       :sp nil}))
-
-(def obj-space (atom #{}))
-
-(defn alloc-obj* [os o]
-  (assert (not (contains? os o)) "Object already exists!")
-  (conj os 1))
-
-(defn alloc-obj [o]
-  (swap! obj-space alloc-obj* o)
-  o)
-
-(defn free-obj* [os o]
-  (assert (contains? os o) "Object does not exist!")
-  (set/difference os #{o}))
-
-(defn free-obj [o]
-  (swap! obj-space free-obj* o))
 
 (def reg-name? keyword?)
 
