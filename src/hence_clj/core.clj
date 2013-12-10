@@ -66,17 +66,11 @@
    (pair? f) (recur (cdr f))
    :else false))
 
-(defn free-list []
-  (with-meta
-    (reify IPair
-      (car [p] nil)
-      (cdr [p] (free-list))
-      (internalString [p]
-        "[free list] ..."))
-    {:type :free-list}))
+(def registers (atom {}))
 
-(def registers (atom {:fr (free-list)
-                      :sp nil}))
+(add-watch registers :trace
+           (fn [k r os ns]
+             (pp/with-pprint-dispatch print (pp/pprint ns))))
 
 (def reg-name? keyword?)
 
@@ -84,7 +78,6 @@
   ([] (reg (gensym)))
   ([n] (-> n name keyword)))
 
-(def fr :fr)
 (def sp :sp)
 
 (defn reg-vals*
@@ -93,10 +86,17 @@
   ([reg-map regs]
      (map reg-map regs)))
 
+(defmacro reg-set-fn [regs r v]
+  `(if (and (null? ~v))
+     (dissoc ~regs ~r)
+     (assoc ~regs ~r ~v)))
+
 (defn swap* [regs r1 r2]
   (assert (not (eq? r1 r2)) "Cannot swap a register with itself")
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
-    (assoc regs r1 v2 r2 v1)))
+    (-> regs
+        (reg-set-fn r1 v2)
+        (reg-set-fn r2 v1))))
 
 (defn swap [r1 r2]
   (swap! registers swap* r1 r2))
@@ -105,8 +105,10 @@
   (assert (not (eq? r1 r2)) "Cannot swap a register with itself")
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
     (assert (pair? v2) "Second argument must be a pair")
-    (let [new-list (->Pair v1 (cdr v2))]
-      (assoc regs r1 (car v2) r2 new-list))))
+    (let [new-pair (->Pair v1 (cdr v2))]
+      (-> regs
+          (reg-set-fn r1 (car v2))
+          (assoc r2 new-pair)))))
  
 (defn swap-car [r1 r2]
   (swap! registers swap-car* r1 r2))
@@ -116,7 +118,9 @@
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
     (assert (pair? v2) "Second argument must be a pair")
     (let [new-pair (->Pair (car v2) v1)]
-      (assoc regs r1 (cdr v2) r2 new-pair))))
+      (-> regs
+          (reg-set-fn r1 (cdr v2))
+          (assoc r2 new-pair)))))
 
 (defn swap-cdr [r1 r2]
   (swap! registers swap-cdr* r1 r2))
@@ -125,7 +129,7 @@
   (assert (atom? val) "Cannot assign a non-atom directly")
   (let [old-val (regs r1)]
     (assert (atom? old-val) "Cannot overwrite a register referencing a pair")
-    (assoc regs r1 val)))
+    (reg-set-fn regs r1 val)))
 
 (defn sreg-to-reg* [regs r1 r2]
   (let [v2 (regs r2)]
@@ -138,10 +142,12 @@
     (swap! registers swap-fn r1 val)))
 
 (defn cons* [regs r1 r2]
-  (-> regs
-      (swap-car* r1 fr)
-      (swap* r2 fr)
-      (swap-cdr* fr r2)))
+  (assert (not (eq? r1 r2)) "Cannot cons a register to itself")
+  (let [[v1 v2] (reg-vals* [r1 r2])]
+    (assert (or (null? v2) (pair? v2)) "Second argument must be a pair or null")
+    (-> regs
+        (assoc r2 (->Pair v1 v2))
+        (dissoc r1))))
 
 (defn cons [r1 r2]
   (swap! registers cons* r1 r2))
@@ -152,9 +158,8 @@
     (assert (null? v1) "Register to pop into must be null")
     (assert (pair? v2) "Register to pop from must be a pair")
     (-> regs
-        (swap-cdr* fr r2)
-        (swap* r2 fr)
-        (swap-car* r1 fr))))
+        (reg-set-fn r1 (car v2))
+        (reg-set-fn r2 (cdr v2)))))
 
 (defn pop [r1 r2]
   (swap! registers pop* r1 r2))
