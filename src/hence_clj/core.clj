@@ -3,7 +3,7 @@
             [clojure.set :as set]
             [clojure.pprint :as pp]
             [clojure.repl :as repl :refer [doc]])
-  (:refer-clojure :exclude [cons atom? list?])
+  (:refer-clojure :exclude [cons atom? list? pop])
   (:alias core clojure.core)
   (:import [java.io Writer]))
 
@@ -45,9 +45,6 @@
   (.write w "([free list] ...)"))
 
 (declare alloc-obj)
-(defn cons [a d]
-  (let [d (if (and (core/list? d) (empty? d)) nil d)]
-    (alloc-obj (->Pair a d))))
 
 (defn pair? [f]
   (satisfies? IPair f))
@@ -117,7 +114,7 @@
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
     (assert (not (eq? v1 v2)) "Cannot swap a value with itself")
     (assert (pair? v2) "Second argument must be a pair")
-    (let [new-list (cons v1 (cdr v2))]
+    (let [new-list (->Pair v1 (cdr v2))]
       (assoc regs r1 (car v2) r2 new-list))))
  
 (defn swap-car [r1 r2]
@@ -127,7 +124,7 @@
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
     (assert (not (eq? v1 v2)) "Cannot swap a value with itself")
     (assert (pair? v2) "Second argument must be a pair")
-    (let [new-pair (cons (car v2) v1)]
+    (let [new-pair (->Pair (car v2) v1)]
       (assoc regs r1 (cdr v2) r2 new-pair))))
 
 (defn swap-cdr [r1 r2]
@@ -136,7 +133,7 @@
 (defn sreg-to-val* [regs r1 val]
   (assert (atom? val) "Cannot assign a non-atom directly")
   (let [old-val (regs r1)]
-    (assert (atom? old-val) "Cannot overwrite a list register")
+    (assert (atom? old-val) "Cannot overwrite a register referencing a pair")
     (assoc regs r1 val)))
 
 (defn sreg-to-reg* [regs r1 r2]
@@ -148,3 +145,63 @@
                   sreg-to-reg*
                   sreg-to-val*)]
     (swap! registers swap-fn r1 val)))
+
+(defn cons* [regs r1 r2]
+  (-> regs
+      (swap-car* r1 :fr)
+      (swap r2 :fr)
+      (swap-cdr* :fr r2)))
+
+(defn cons [r1 r2]
+  (swap! registers cons* r1 r2))
+(def push cons)
+
+(defn pop* [regs r1 r2]
+  (assert (null? r1) "Register to pop into must be null")
+  (assert (pair? r2) "Register to pop from must be a pair")
+  (-> regs
+      (swap-cdr* :fr r2)
+      (swap* r2 fr)
+      (swap-car* r1 :fr)))
+
+(defn pop [r1 r2]
+  (swap! registers pop* r1 r2))
+
+(defn free [r1]
+  (let [v1 (@registers r1)]
+    (if-not (null? v1)
+      (if (atom? v1)
+        (sreg r1 nil)
+        (do
+          (push r2 :sp) (pop r2 r1)
+          (free r1)
+          (swap r2 r1) (free r1)
+          (pop r2 :sp))))))
+
+(defn copy [r1 r2]
+  (let [[v1 v2] (reg-vals* [r1 r2])]
+    (assert (null? v2) "Cannot copy into populated register")
+    (if (atom? r2)
+      (sreg r2 r1)
+      (do
+        (push :t1 :sp) (push :t2 :sp)
+        (pop :t1 r1) (copy r1 r2)
+        (swap :t1 r1) (swap :t2 r2) (copy r1 r2)
+        (swap :t1 r1) (swap :t2 r2) (push :t1 r1) (push :t2 r2)
+        (pop :t2 sp) (pop :t1 sp)))))
+
+(defmacro prog1 [form & forms]
+  `(let [ret# ~form]
+     ~@forms
+     ret#))
+
+(defn equal? [r1 r2]
+  (or (and (atom? r1 (atom? r2) (eq? r1 r2)))
+      (and (not (atom? r1)) (not (atom? r2))
+           (do
+             (push :t1 :sp) (push :t2 sp) (pop :t1 r1) (pop :t2 r2)
+             (prog1 (and (equal? r1 r2)
+                         (do (swap :t1 r1) (swap :t2 r2)
+                             (prog1 (equal r1 r2)
+                                    (swap :t1 r1) (swap :t2 r2))))
+                    (push :t1 r1) (push :t2 r2) (pop :t2 sp) (pop :t2 sp))))))
