@@ -41,9 +41,6 @@
 (defmethod core/print-method Pair
   [p ^Writer w]
   p(.write w (str p)))
-(defmethod core/print-method :free-list
-  [p ^Writer w]
-  (.write w "([free list] ...)"))
 
 (defn pair? [f]
   (satisfies? IPair f))
@@ -85,7 +82,7 @@
   ([reg-map regs]
      (map reg-map regs)))
 
-(defmacro reg-set-fn [regs r v]
+(defmacro update-reg [regs r v]
   `(if (and (nil? ~v))
      (dissoc ~regs ~r)
      (assoc ~regs ~r ~v)))
@@ -94,8 +91,8 @@
   (assert (not (eq? r1 r2)) "Cannot swap a register with itself")
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
     (-> regs
-        (reg-set-fn r1 v2)
-        (reg-set-fn r2 v1))))
+        (update-reg r1 v2)
+        (update-reg r2 v1))))
 
 (defn swap [r1 r2]
   (swap! registers swap* r1 r2))
@@ -106,7 +103,7 @@
     (assert (pair? v2) "Second argument must be a pair")
     (let [new-pair (->Pair v1 (cdr v2))]
       (-> regs
-          (reg-set-fn r1 (car v2))
+          (update-reg r1 (car v2))
           (assoc r2 new-pair)))))
  
 (defn swap-car [r1 r2]
@@ -118,7 +115,7 @@
     (assert (pair? v2) "Second argument must be a pair")
     (let [new-pair (->Pair (car v2) v1)]
       (-> regs
-          (reg-set-fn r1 (cdr v2))
+          (update-reg r1 (cdr v2))
           (assoc r2 new-pair)))))
 
 (defn swap-cdr [r1 r2]
@@ -128,7 +125,7 @@
   (assert (atom? val) "Cannot assign a non-atom directly")
   (let [old-val (regs r1)]
     (assert (atom? old-val) "Cannot overwrite a register referencing a pair")
-    (reg-set-fn regs r1 val)))
+    (update-reg regs r1 val)))
 
 (defn sreg-to-reg* [regs r1 r2]
   (let [v2 (regs r2)]
@@ -157,35 +154,42 @@
     (assert (nil? v1) "Register to pop into must be null")
     (assert (pair? v2) "Register to pop from must be a pair")
     (-> regs
-        (reg-set-fn r1 (car v2))
-        (reg-set-fn r2 (cdr v2)))))
+        (update-reg r1 (car v2))
+        (update-reg r2 (cdr v2)))))
 
 (defn pop [r1 r2]
   (swap! registers pop* r1 r2))
 
-(defn free [r1]
-  (let [v1 (@registers r1)]
+(defn free* [regs r1]
+  (let [v1 (regs r1)]
     (if-not (nil? v1)
       (if (atom? v1)
-        (sreg r1 nil)
-        (let [t1 (reg "t1")]
-          (push t1 sp) (pop t1 r1)
-          (free r1)
-          (swap t1 r1) (free r1)
-          (pop t1 sp))))))
+        (sreg* regs r1 nil)
+        (let [t1 :t1]
+          (push* regs t1 sp) (pop* regs t1 r1)
+          (free* regs r1)
+          (swap* regs t1 r1) (free* regs r1)
+          (pop* regs t1 sp))))))
 
-(defn copy [r1 r2]
-  (let [[v1 v2] (reg-vals* [r1 r2])]
+(defn free [r1]
+  (swap! registers free* r1))
+
+(defn copy* [regs r1 r2]
+  (let [[v1 v2] (reg-vals* regs [r1 r2])]
     (assert (nil? v2) "Cannot copy into populated register")
     (if (atom? v1)
-      (sreg r2 r1)
-      (let [t1 (reg "t1")
-            t2 (reg "t2")]
-        (push t1 sp) (push t2 sp)
-        (pop t1 r1) (copy r1 r2)
-        (swap t1 r1) (swap t2 r2) (copy r1 r2)
-        (swap t1 r1) (swap t2 r2) (push t1 r1) (push t2 r2)
-        (pop t2 sp) (pop t1 sp)))))
+      (sreg* regs r2 r1)
+      (let [t1 :t1
+            t2 :t2]
+        (-> regs
+            (push* t1 sp) (push* t2 sp)
+            (pop* t1 r1) (copy* r1 r2)
+            (swap* t1 r1) (swap* t2 r2) (copy* r1 r2)
+            (swap* t1 r1) (swap* t2 r2) (push* t1 r1) (push* t2 r2)
+            (pop* t2 sp) (pop* t1 sp))))))
+
+(defn copy [r1 r2]
+  (swap! registers copy* r1 r2))
 
 (defmacro prog1 [form & forms]
   `(let [ret# ~form]
