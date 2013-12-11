@@ -7,7 +7,7 @@
   (:alias core clojure.core)
   (:import [java.io Writer]))
 
-(declare pair? null?)
+(declare pair?)
 
 (defprotocol IPair
   (car [p])
@@ -28,9 +28,9 @@
   (car [p] a)
   (cdr [p] d)
   (internalString [p]
-    (let [str-a (if (null? a) "nil" (str a))]
+    (let [str-a (if (nil? a) "nil" (str a))]
       (cond
-       (null? d) str-a
+       (nil? d) str-a
        (pair? d) (str str-a " " (internalString d))
        :else (str str-a " . " d))))
 
@@ -49,7 +49,6 @@
   (satisfies? IPair f))
 (defmacro atom? [f]
   `(not (pair? ~f)))
-(def null? nil?)
 
 (defmulti eq? (fn [x _] (type x)))
 (defmethod eq? clojure.lang.Symbol
@@ -62,7 +61,7 @@
 
 (defn list? [f]
   (cond
-   (null? f) true
+   (nil? f) true
    (pair? f) (recur (cdr f))
    :else false))
 
@@ -87,7 +86,7 @@
      (map reg-map regs)))
 
 (defmacro reg-set-fn [regs r v]
-  `(if (and (null? ~v))
+  `(if (and (nil? ~v))
      (dissoc ~regs ~r)
      (assoc ~regs ~r ~v)))
 
@@ -144,7 +143,7 @@
 (defn cons* [regs r1 r2]
   (assert (not (eq? r1 r2)) "Cannot cons a register to itself")
   (let [[v1 v2] (reg-vals* [r1 r2])]
-    (assert (or (null? v2) (pair? v2)) "Second argument must be a pair or null")
+    (assert (or (nil? v2) (pair? v2)) "Second argument must be a pair or null")
     (-> regs
         (assoc r2 (->Pair v1 v2))
         (dissoc r1))))
@@ -155,7 +154,7 @@
 
 (defn pop* [regs r1 r2]
   (let [[v1 v2] (reg-vals* regs [r1 r2])]
-    (assert (null? v1) "Register to pop into must be null")
+    (assert (nil? v1) "Register to pop into must be null")
     (assert (pair? v2) "Register to pop from must be a pair")
     (-> regs
         (reg-set-fn r1 (car v2))
@@ -166,7 +165,7 @@
 
 (defn free [r1]
   (let [v1 (@registers r1)]
-    (if-not (null? v1)
+    (if-not (nil? v1)
       (if (atom? v1)
         (sreg r1 nil)
         (let [t1 (reg "t1")]
@@ -177,7 +176,7 @@
 
 (defn copy [r1 r2]
   (let [[v1 v2] (reg-vals* [r1 r2])]
-    (assert (null? v2) "Cannot copy into populated register")
+    (assert (nil? v2) "Cannot copy into populated register")
     (if (atom? v1)
       (sreg r2 r1)
       (let [t1 (reg "t1")
